@@ -5,24 +5,41 @@
   <title>Child (receives token via postMessage)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    :root { --muted:#666; --ok:#0a7a0a; --bad:#b00020; }
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px}
     button{margin:4px 8px 4px 0;padding:8px 12px;border:1px solid #ccc;border-radius:8px;cursor:pointer}
     pre{background:#f6f8fa;padding:8px;border-radius:8px;overflow:auto}
-    .muted{color:#666}.good{color:#0a7a0a}.bad{color:#b00020}
+    .muted{color:var(--muted)} .good{color:var(--ok)} .bad{color:var(--bad)}
+    /* Hide sections by default; JS will toggle */
+    #app { display:none; }
+    #notokens { display:flex; align-items:center; justify-content:center; min-height:50vh; text-align:center; }
+    #notokens .card { padding:24px; border:1px solid #e5e7eb; border-radius:12px; max-width:640px; }
   </style>
 </head>
 <body>
-  <h1>Child iframe</h1>
-  <p class="muted">Waits for access tokens from the parent via <code>postMessage</code>, keeps them <strong>in memory</strong>, and uses them to call <code>/userinfo</code> and Spark.</p>
+  <!-- No-token message (default visible) -->
+  <section id="notokens">
+    <div class="card">
+      <h1>No tokens from host site</h1>
+      <p class="muted">This page runs inside a parent site that handles sign-in. We didn’t receive an access token yet.</p>
+      <p class="muted">If you’re signed in on the host, please refresh the parent page. Otherwise, sign in from the host site.</p>
+    </div>
+  </section>
 
-  <div>
-    <button id="btn-userinfo" disabled>Call /userinfo</button>
-    <button id="btn-spark" disabled>Call Spark getCategories</button>
-    <span id="status" class="muted">Waiting for token…</span>
-  </div>
+  <!-- App UI (shown only after token arrives) -->
+  <section id="app">
+    <h1>Child iframe</h1>
+    <p class="muted">Receives access tokens from the parent via <code>postMessage</code>, keeps them in memory, and uses them to call <code>/userinfo</code> and Spark.</p>
 
-  <h3>Last response</h3>
-  <pre id="out">(none)</pre>
+    <div>
+      <button id="btn-userinfo" disabled>Call /userinfo</button>
+      <button id="btn-spark" disabled>Call Spark getCategories</button>
+      <span id="status" class="muted">Waiting for token…</span>
+    </div>
+
+    <h3>Last response</h3>
+    <pre id="out">(none)</pre>
+  </section>
 
   <script>
     // ==== Keycloak realm base (for /userinfo only) ====
@@ -37,37 +54,59 @@
     const PARENT_ORIGIN = "https://alexey-demo.glazirin.com";
 
     let ACCESS_TOKEN = null; // in-memory only
+    let waitTimer = null;
 
-    function setStatus(m,c="muted"){const s=document.getElementById("status");s.textContent=m;s.className=c;}
+    // Helpers
+    const $ = (id)=>document.getElementById(id);
+    function setStatus(m,c="muted"){ const s=$("status"); if(s){ s.textContent=m; s.className=c; } }
     function show(o){
-      const el = document.getElementById("out");
+      const el = $("out");
+      if (!el) return;
       if (typeof o === "string") { el.textContent = o; return; }
       try { el.textContent = JSON.stringify(o, null, 2); }
       catch { el.textContent = String(o); }
     }
+    function showAppUI(on){
+      $("app").style.display = on ? "block" : "none";
+      $("notokens").style.display = on ? "none" : "flex";
+    }
+    function enableButtons(on){
+      const u = $("btn-userinfo"), s = $("btn-spark");
+      if (u) u.disabled = !on;
+      if (s) s.disabled = !on;
+    }
 
-    // Announce readiness so parent can push token immediately
+    // Ask parent for token immediately
     window.parent.postMessage({ type: "kc-ready" }, PARENT_ORIGIN);
 
+    // If no token within 4s, keep/show "no tokens" message
+    waitTimer = setTimeout(() => {
+      if (!ACCESS_TOKEN) {
+        showAppUI(false);
+      }
+    }, 4000);
+
+    // Receive tokens / logout from parent
     window.addEventListener("message", (e)=>{
       if (e.origin !== PARENT_ORIGIN) return; // strict origin check
       const msg = e.data || {};
       if (msg.type === "kc-token" && typeof msg.access_token === "string") {
         ACCESS_TOKEN = msg.access_token;
+        clearTimeout(waitTimer);
+        showAppUI(true);
         setStatus("Token received","good");
-        document.getElementById("btn-userinfo").disabled = false;
-        document.getElementById("btn-spark").disabled = false;
+        enableButtons(true);
       } else if (msg.type === "kc-logout") {
         ACCESS_TOKEN = null;
+        enableButtons(false);
         setStatus("Logged out by parent","muted");
-        document.getElementById("btn-userinfo").disabled = true;
-        document.getElementById("btn-spark").disabled = true;
         show("(none)");
+        showAppUI(false); // return to no-tokens screen
       }
     });
 
     // /userinfo call
-    document.getElementById("btn-userinfo").onclick = async ()=>{
+    $("btn-userinfo").onclick = async ()=>{
       if (!ACCESS_TOKEN) { setStatus("No token","bad"); return; }
       try {
         const resp = await fetch(USERINFO, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
@@ -81,7 +120,7 @@
     };
 
     // Spark call (your curl as fetch)
-    document.getElementById("btn-spark").onclick = async ()=>{
+    $("btn-spark").onclick = async ()=>{
       if (!ACCESS_TOKEN) { setStatus("No token","bad"); return; }
       try {
         const resp = await fetch(SPARK_GET_CATEGORIES, {
