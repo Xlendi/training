@@ -13,10 +13,11 @@
 </head>
 <body>
   <h1>Child iframe</h1>
-  <p class="muted">Waits for access tokens from the parent via <code>postMessage</code>, keeps them <strong>in memory</strong>, and uses them to call <code>/userinfo</code>.</p>
+  <p class="muted">Waits for access tokens from the parent via <code>postMessage</code>, keeps them <strong>in memory</strong>, and uses them to call <code>/userinfo</code> and Spark.</p>
 
   <div>
     <button id="btn-userinfo" disabled>Call /userinfo</button>
+    <button id="btn-spark" disabled>Call Spark getCategories</button>
     <span id="status" class="muted">Waiting for token…</span>
   </div>
 
@@ -24,18 +25,26 @@
   <pre id="out">(none)</pre>
 
   <script>
-    // ==== Configure your Keycloak realm base for /userinfo only ====
+    // ==== Keycloak realm base (for /userinfo only) ====
     const KEYCLOAK_BASE = "https://keycloak.uat.au.coherent.global/auth";
     const REALM = "fieldengineering";
     const USERINFO = `${KEYCLOAK_BASE}/realms/${REALM}/protocol/openid-connect/userinfo`;
 
-    // Only trust messages from this parent:
-    const PARENT_ORIGIN = "https://alexey-demo.glazirin.com"; // <-- set to your parent origin
+    // ==== Spark API (from your curl) ====
+    const SPARK_GET_CATEGORIES = "https://excel.uat.au.coherent.global/api/v1/lookup/getCategories";
+
+    // Only trust messages from this parent (origin only, no path)
+    const PARENT_ORIGIN = "https://alexey-demo.glazirin.com";
 
     let ACCESS_TOKEN = null; // in-memory only
 
     function setStatus(m,c="muted"){const s=document.getElementById("status");s.textContent=m;s.className=c;}
-    function show(o){document.getElementById("out").textContent = typeof o==="string"?o:JSON.stringify(o,null,2);}
+    function show(o){
+      const el = document.getElementById("out");
+      if (typeof o === "string") { el.textContent = o; return; }
+      try { el.textContent = JSON.stringify(o, null, 2); }
+      catch { el.textContent = String(o); }
+    }
 
     // Announce readiness so parent can push token immediately
     window.parent.postMessage({ type: "kc-ready" }, PARENT_ORIGIN);
@@ -47,23 +56,44 @@
         ACCESS_TOKEN = msg.access_token;
         setStatus("Token received","good");
         document.getElementById("btn-userinfo").disabled = false;
+        document.getElementById("btn-spark").disabled = false;
       } else if (msg.type === "kc-logout") {
         ACCESS_TOKEN = null;
         setStatus("Logged out by parent","muted");
         document.getElementById("btn-userinfo").disabled = true;
+        document.getElementById("btn-spark").disabled = true;
         show("(none)");
       }
     });
 
+    // /userinfo call
     document.getElementById("btn-userinfo").onclick = async ()=>{
       if (!ACCESS_TOKEN) { setStatus("No token","bad"); return; }
-      const resp = await fetch(USERINFO, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
-      if (!resp.ok) {
-        setStatus(`userinfo failed: ${resp.status}`,"bad");
-        show(await resp.text());
-      } else {
+      try {
+        const resp = await fetch(USERINFO, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+        const text = await resp.text();
+        if (!resp.ok) { setStatus(`userinfo failed: ${resp.status}`,"bad"); show(text); return; }
         setStatus("userinfo OK","good");
-        show(await resp.json());
+        try { show(JSON.parse(text)); } catch { show(text); }
+      } catch (err) {
+        setStatus("userinfo error","bad"); show(String(err));
+      }
+    };
+
+    // Spark call (your curl as fetch)
+    document.getElementById("btn-spark").onclick = async ()=>{
+      if (!ACCESS_TOKEN) { setStatus("No token","bad"); return; }
+      try {
+        const resp = await fetch(SPARK_GET_CATEGORIES, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
+        });
+        const text = await resp.text();
+        if (!resp.ok) { setStatus(`spark failed: ${resp.status}`,"bad"); show(text); return; }
+        setStatus("spark OK","good");
+        try { show(JSON.parse(text)); } catch { show(text); }
+      } catch (err) {
+        setStatus("spark error","bad"); show(String(err));
       }
     };
   </script>
