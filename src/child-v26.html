@@ -43,13 +43,12 @@
 
   <script>
     // ==== Keycloak realm base (for /userinfo only) ====
-    //const KEYCLOAK_BASE = "https://keycloak.uat.au.coherent.global/auth";
-    const KEYCLOAK_BASE = "https://keycloak.uat.au.coherent.global/auth";
-    const REALM = "fieldengineering";
+    const KEYCLOAK_BASE = "https://keycloak.test.coherent.global/auth";
+    const REALM = "coherent";
     const USERINFO = `${KEYCLOAK_BASE}/realms/${REALM}/protocol/openid-connect/userinfo`;
 
     // ==== Spark API (from your curl) ====
-    const SPARK_GET_CATEGORIES = "https://excel.uat.au.coherent.global/api/v1/lookup/getCategories";
+    const SPARK_GET_CATEGORIES = "https://excel.test.coherent.global/api/v1/lookup/getCategories";
 
     // Only trust messages from this parent (origin only, no path)
     const PARENT_ORIGIN = "https://alexey-demo.glazirin.com";
